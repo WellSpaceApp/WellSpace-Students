@@ -1,9 +1,9 @@
 # WellSpace Privacy Policy
 
 **Effective Date:** June 2026
-**Last Updated:** July 2026
+**Last Updated:** November 2026
 **Contact:** wellspacewebsite@gmail.com
-**Platform:** wellspaceapp.github.io/WellSpaceStudents
+**Platform:** wellspaceapp.github.io/WellSpace-Students
 
 ---
 
@@ -188,7 +188,7 @@ If we make material changes to this Privacy Policy, we will post a notice within
 For any privacy-related questions, data access requests, or concerns, please contact:
 
 **Email:** wellspacewebsite@gmail.com
-**Platform:** wellspaceapp.github.io/WellSpaceStudents
+**Platform:** wellspaceapp.github.io/WellSpace-Students
 **GitHub:** github.com/WellSpaceApp/WellSpaceStudents
 
 ---
