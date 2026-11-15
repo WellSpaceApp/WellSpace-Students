@@ -3,7 +3,7 @@
 ## Supported Versions
 
 WellSpace is a single continuously-deployed web app (no version numbers).
-Only the current live version at wellspaceapp.github.io/WellSpace is supported.
+Only the current live version at wellspaceapp.github.io/WellSpaceStudents is supported.
 
 ## Reporting a Vulnerability
 
