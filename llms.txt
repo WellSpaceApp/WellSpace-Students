@@ -16,8 +16,8 @@ WellSpace lets students privately track daily mood, sleep, energy levels, goals,
 - Full details are in the in-app Privacy Policy.
 
 ## Key pages
-- Homepage / app: https://wellspaceapp.github.io/WellSpace/
-- Source code: https://github.com/WellSpaceApp/WellSpace
+- Homepage / app: https://wellspaceapp.github.io/WellSpaceStudents/
+- Source code: https://github.com/WellSpaceApp/WellSpaceStudents
 
 ## Contact
 wellspacewebsite@gmail.com
