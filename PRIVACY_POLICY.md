@@ -3,7 +3,7 @@
 **Effective Date:** June 2026
 **Last Updated:** July 2026
 **Contact:** wellspacewebsite@gmail.com
-**Platform:** wellspaceapp.github.io/WellSpace
+**Platform:** wellspaceapp.github.io/WellSpaceStudents
 
 ---
 
@@ -188,8 +188,8 @@ If we make material changes to this Privacy Policy, we will post a notice within
 For any privacy-related questions, data access requests, or concerns, please contact:
 
 **Email:** wellspacewebsite@gmail.com
-**Platform:** wellspaceapp.github.io/WellSpace
-**GitHub:** github.com/WellSpaceApp/WellSpace
+**Platform:** wellspaceapp.github.io/WellSpaceStudents
+**GitHub:** github.com/WellSpaceApp/WellSpaceStudents
 
 ---
 
