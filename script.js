@@ -1198,7 +1198,7 @@ function renderMoodCheck(){
   }).join('');
 }
 
-function escQ(s){ return s.replace(/'/g,"\\'"); }
+function escQ(s){ return escapeHtml(String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'")); }
 
 function selectMood(classId, classLabel, mood){
   document.querySelectorAll('.support-popup').forEach(p => p.classList.add('hidden'));
@@ -1536,7 +1536,7 @@ async function renderWellnessSection(){
   if(hasClasses()){
     const teacherOpts = myClasses.map(c => {
       const teacher = gt().find(t => t.id === c.teacherId);
-      return `<option value="${c.teacherId}|${c.id}">${c.subject} (${teacher?.name || 'Teacher'})</option>`;
+      return `<option value="${escapeHtml(c.teacherId)}|${escapeHtml(c.id)}">${escapeHtml(c.subject)} (${escapeHtml(teacher?.name || 'Teacher')})</option>`;
     }).join('');
     const optHtml = `<option value="">Pick a period…</option>` + teacherOpts;
     ['sleep-teacher-sel','resp-teacher-sel','energy-teacher-sel'].forEach(id => {
@@ -1994,7 +1994,7 @@ function renderTeacherClasses(){
           <span class="cls-time">🕐 ${escapeHtml(c.startTime)} - ${escapeHtml(c.endTime)} · ${escapeHtml(c.days?.join(', ')||'-')}</span>
           ${c.bannerMsg ? `<div class="cls-banner-msg">${escapeHtml(c.bannerMsg)}</div>` : ''}
           <div class="t-class-actions">
-            <button class="btn-outline small" onclick="copyCode('${c.code}')">📋 Copy Code</button>
+            <button class="btn-outline small" onclick="copyCode('${escQ(c.code)}')">📋 Copy Code</button>
             <button class="btn-outline small" onclick="deleteClass('${c.id}')" style="padding:7px 10px">🗑</button>
           </div>
         </div>
@@ -2630,7 +2630,9 @@ async function fsGetAllClasses(){
   if(!fbDb) return [];
   try {
     const snap = await fbDb.collection('shared_classes').get();
-    return snap.docs.map(d => d.data());
+    return snap.docs.map(d => d.data())
+      .filter(c => /^[A-Za-z0-9_-]{1,40}$/.test(c.id || ''))
+      .map(c => ({ ...c, color: /^#[0-9a-fA-F]{6}$/.test(c.color || '') ? c.color : '#1d5fa6' }));
   } catch(e){ return []; }
 }
 
@@ -3158,6 +3160,11 @@ async function confirmVerifyCode(){
      if(role === 'student'){
         const grade = pendingVerify.grade;
         const classCode = pendingVerify.code_class || '';
+        // Create the account FIRST. shared_classes can only be read by a
+        // signed-in user, so looking the code up before this point always
+        // came back empty and a code typed at signup never joined the class.
+        const cred = await fbAuth.createUserWithEmailAndPassword(email, pass);
+        const uid  = cred.user.uid;
         const classes = await fsGetAllClasses();
         cSet('classes', classes);
         let classIds = [];
@@ -3167,10 +3174,10 @@ async function confirmVerifyCode(){
           if(cls){
             classIds = [cls.id];
             teacherUids = [cls.teacherUid || cls.teacherId];
+          } else {
+            setTimeout(() => toast(`Class code "${classCode}" wasn't found - you can join from My Classes.`), 3500);
           }
         }
-        const cred = await fbAuth.createUserWithEmailAndPassword(email, pass);
-        const uid  = cred.user.uid;
         const localId = 's'+uid8();
         const profile = { role:'student', name, email, grade, classIds, teacherUids, periodOrder:[], joined:today(), localId, uid };
         // BUGFIX: this save was missing, so students who signed up through
