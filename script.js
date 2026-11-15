@@ -685,96 +685,13 @@ async function doLogin(){
   }
 }
 
-// ─────────────────────────────────────────────
-// AUTH - SIGNUP (Firebase Auth)
-// ─────────────────────────────────────────────
-async function doSignup(){
-  const name  = document.getElementById('su-name').value.trim();
-  const email = document.getElementById('su-email').value.trim().toLowerCase();
-  const pass  = document.getElementById('su-pass').value;
-  const privacyOk = document.getElementById('su-privacy').checked;
-  const errEl = document.getElementById('signup-err');
-
-  if(!name||!email||!pass) return showErr(errEl,'Please fill in all required fields.');
-  if(!validEmail(email))   return showErr(errEl,'Please enter a valid email address.');
-  if(!validPw(pass))       return showErr(errEl,'Password must be 8+ chars with uppercase, number & special character.');
-  if(!privacyOk)           return showErr(errEl,'Please accept the privacy policy to continue.');
-
-  try {
-    if(authRole==='student'){
-      const grade = document.getElementById('su-grade').value;
-      const code  = document.getElementById('su-code').value.trim().toUpperCase();
-      if(!grade) return showErr(errEl,'Please select your grade.');
-
-      // Look up class code in the per-doc classes collection (source of truth)
-      const classes = await fsGetAllClasses();
-      cSet('classes', classes);
-
-      let classIds = [];
-      if(code){
-        const cls = classes.find(c=>c.code===code);
-        if(!cls) return showErr(errEl,`Class code "${code}" not found. Ask your teacher for the correct code.`);
-        classIds = [cls.id];
-      }
-
-      // Create Firebase Auth account
-      const cred = await fbAuth.createUserWithEmailAndPassword(email, pass);
-      const uid  = cred.user.uid;
-      const localId = 's'+uid8();
-
-      const profile = { role:'student', name, email, grade, classIds, periodOrder:[], joined:today(), localId, uid };
-
-      // Save profile to shared profiles collection (this is what teachers query)
-      await saveProfile(uid, profile);
-
-      // Save student list entry to user's own doc
-      const studentEntry = { id:localId, name, email, grade, classIds, periodOrder:[], joined:today() };
-      cSet('students', [studentEntry]);
-      await fsSet('students', [studentEntry]);
-
-      CU = { ...profile, id: localId };
-      await loadUserData();
-      await ensureTeacherLinks();
-      toast(`Account created! Welcome, ${name} 🎉`);
-      loadStudentDash();
-
-    } else {
-      const province = document.getElementById('su-province').value;
-      const school   = document.getElementById('su-school').value.trim();
-      if(!province) return showErr(errEl,'Please select your province.');
-
-      const cred = await fbAuth.createUserWithEmailAndPassword(email, pass);
-      const uid  = cred.user.uid;
-      const localId = 't'+uid8();
-
-      const profile = { role:'teacher', name, email, province, school, socialWorker:null, approvedStudentUids:[], joined:today(), localId, uid };
-      await saveProfile(uid, profile);
-
-      const teacherEntry = { id:localId, name, email, province, school, socialWorker:null, joined:today() };
-      cSet('teachers', [teacherEntry]);
-      await fsSet('teachers', [teacherEntry]);
-
-      CU = { ...profile, id: localId };
-      await loadUserData();
-      toast(`Account created! Welcome, ${name} 📋`);
-      loadTeacherDash();
-    }
-  } catch(e){
-    if(e.code==='auth/email-already-in-use'){
-      showErr(errEl,'An account with this email already exists.');
-    } else {
-      showErr(errEl,'Could not create account. Please try again.');
-      console.error(e);
-    }
-  }
-}
-
 function logout(){
   CU=null; authRole=null;
   pendingMoodSel=null;
   Object.keys(cache).forEach(k=>delete cache[k]);
   invalidateTeacherCache();
   stopTeacherLive();
+  _classesCache = null;
   if(fbAuth) fbAuth.signOut().catch(()=>{});
   showScreen('screen-entry');
 }
@@ -1401,7 +1318,7 @@ async function renderStats(){
   const activeClassLabels = new Set(classes.map(c => c.subject));
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - 7);
-  const cutoffStr = cutoff.toISOString().split('T')[0];
+  const cutoffStr = localDateStr(cutoff);
 
   // MOOD PRUNE: drop anything tied to a class that's since been deleted or
   // left (no teacher left who could see it), AND anything older than 7 days
@@ -1783,7 +1700,7 @@ async function joinClass(){
   const code = (inp?.value || '').trim().toUpperCase();
   if(!code) return toast('Please enter a class code.');
 
-  const classes = await fsGetAllClasses();
+  const classes = await fsGetAllClasses(true);
   cSet('classes', classes);
   const cls = classes.find(c => c.code === code);
   if(!cls) return toast(`Class code "${code}" not found. Double-check with your teacher.`);
@@ -2126,7 +2043,7 @@ function renderStudentReport(studentId){
   // 7-day window.
   const weekStart = startOfWeekStr();
   const weekDates = [];
-  for(let i=0;i<7;i++){ const d=new Date(weekStart+'T00:00:00'); d.setDate(d.getDate()+i); weekDates.push(d.toISOString().split('T')[0]); }
+  for(let i=0;i<7;i++){ const d=new Date(weekStart+'T00:00:00'); d.setDate(d.getDate()+i); weekDates.push(localDateStr(d)); }
   const fmtDate = d => new Date(d+'T00:00:00').toLocaleDateString('en-CA',{weekday:'short',month:'short',day:'numeric'});
   const myClassIds = getMyClasses().map(c=>c.id);
 
@@ -2344,7 +2261,7 @@ function renderWeeklySummary(){
   for(let i = 0; i < 7; i++){
     const d = new Date();
     d.setDate(d.getDate() - i);
-    past7.push(d.toISOString().split('T')[0]);
+    past7.push(localDateStr(d));
   }
   const past7Set = new Set(past7);
 
@@ -2626,13 +2543,21 @@ async function fsDeleteClass(classId){
   }
 }
 
-async function fsGetAllClasses(){
+// Reading every class on the platform costs one Firestore read per class, and
+// Stats/Wellness call this on every visit. Cache it for 60s; pass force=true
+// where a stale list would be wrong (joining by code, creating a class).
+let _classesCache = null;
+let _classesCacheTime = 0;
+async function fsGetAllClasses(force = false){
   if(!fbDb) return [];
+  if(!force && _classesCache && (Date.now() - _classesCacheTime) < 60 * 1000) return [..._classesCache];
   try {
     const snap = await fbDb.collection('shared_classes').get();
-    return snap.docs.map(d => d.data())
+    _classesCache = snap.docs.map(d => d.data())
       .filter(c => /^[A-Za-z0-9_-]{1,40}$/.test(c.id || ''))
       .map(c => ({ ...c, color: /^#[0-9a-fA-F]{6}$/.test(c.color || '') ? c.color : '#1d5fa6' }));
+    _classesCacheTime = Date.now();
+    return [..._classesCache];
   } catch(e){ return []; }
 }
 
@@ -2653,7 +2578,7 @@ async function createClass(){
   // Fast, non-authoritative check for quick feedback - this alone is a
   // race (read-then-write), so the transaction below is what actually
   // guarantees uniqueness.
-  const existingClasses = await fsGetAllClasses();
+  const existingClasses = await fsGetAllClasses(true);
   if(existingClasses.find(c=>c.code===code)) return toast('That code already exists - try generating a new one.');
 
   // teacherId is the short display id (used everywhere else in the UI).
@@ -2681,6 +2606,7 @@ async function createClass(){
   }
 
   const saved = await fsSetClass(newClass);
+  _classesCache = null;
   if(!saved){
     // Release the reserved code so it isn't stuck pointing at a class that doesn't exist
     try { await fbDb.collection('class_codes').doc(code).delete(); } catch(e){}
@@ -2703,12 +2629,15 @@ async function createClass(){
   toast('Class created! 🎉');
   renderTeacherClasses();
   invalidateTeacherCache();
+  // so a brand-new teacher gets live updates without having to click a tab first
+  loadTeacherStudents().then(refreshTeacherView);
 }
 
 async function deleteClass(id){
   if(!confirm('Delete this class? Students will lose access.'))return;
   const cls = cGet('classes', []).find(c=>c.id===id);
   await fsDeleteClass(id);
+  _classesCache = null;
   if(cls?.code){
     try { await fbDb.collection('class_codes').doc(cls.code).delete(); }
     catch(e){ console.error('class_codes cleanup failed', e); }
@@ -2772,7 +2701,12 @@ function toggleSB(id){
   document.getElementById(id)?.classList.toggle('open');
 }
 
-function today(){ return new Date().toISOString().split('T')[0]; }
+// Local calendar date as YYYY-MM-DD. (toISOString() is UTC, so after ~7pm in
+// Ontario it returned TOMORROW's date and evening entries landed on the wrong day.)
+function localDateStr(d){
+  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+}
+function today(){ return localDateStr(new Date()); }
 // Sunday of the current week, as YYYY-MM-DD. Used to reset weekly views
 // (Mood Reports, shared responsibilities, the Wellness Tracker's sleep
 // and responsibility logs) every Sunday instead of piling up forever.
@@ -2781,7 +2715,7 @@ function startOfWeekStr(){
   const start = new Date(now);
   start.setDate(now.getDate() - now.getDay());
   start.setHours(0,0,0,0);
-  return start.toISOString().split('T')[0];
+  return localDateStr(start);
 }
 // Unbiased random integer in [0, max) from the browser's crypto RNG
 function secureRandomInt(max){
@@ -3055,6 +2989,8 @@ async function executeDeleteAccount(){
     const cred = firebase.auth.EmailAuthProvider.credential(CU.email, pass);
     await fbAuth.currentUser.reauthenticateWithCredential(cred);
 
+    stopTeacherLive();
+
     // Delete Firestore data
     if(fbDb && fbAuth.currentUser){
       await fbDb.collection('users').doc(fbAuth.currentUser.uid).delete().catch(()=>{});
@@ -3165,7 +3101,7 @@ async function confirmVerifyCode(){
         // came back empty and a code typed at signup never joined the class.
         const cred = await fbAuth.createUserWithEmailAndPassword(email, pass);
         const uid  = cred.user.uid;
-        const classes = await fsGetAllClasses();
+        const classes = await fsGetAllClasses(true);
         cSet('classes', classes);
         let classIds = [];
         let teacherUids = [];
